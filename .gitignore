@@ -1,0 +1,4 @@
+/__pycache__/
+/validation_files/__pycache__
+.env
+test.py
