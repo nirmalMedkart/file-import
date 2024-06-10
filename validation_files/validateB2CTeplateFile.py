@@ -2,13 +2,13 @@ from connections import get_connection
 from psycopg2 import sql
 import pandas as pd
 import boto3
+from io import StringIO
 import constants
 import sys
 from datetime import datetime
 import os
 from dotenv import load_dotenv
 import jobStatus
-import commonFunctions
 
 load_dotenv()
 
@@ -34,11 +34,32 @@ file_import_update_query = sql.SQL("""
         WHERE id = %s
         """)
 
-products_data = commonFunctions.get_product_data()
-stores_data = commonFunctions.get_store_data() 
-min_max_data = commonFunctions.get_min_max_data()
+
+s3_client = boto3.client('s3', aws_access_key_id=os.getenv('AWS_ACCESS_KEY'), aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'))
 
 
+def get_product_data():
+    query = "SELECT * FROM products WHERE deleted_at is NULL"
+    return pd.read_sql(query, conn)
+
+def get_store_data():
+    query = "SELECT * FROM stores WHERE deleted_at is NULL"
+    return pd.read_sql(query, conn)
+
+def get_min_max_data():
+    query = ''' SELECT * FROM min_max
+                WHERE deleted_at is NULL '''
+    return pd.read_sql(query, conn)
+
+
+products_data = get_product_data()
+stores_data = get_store_data() 
+min_max_data = get_min_max_data()
+
+# pd.set_option('display.max_rows', None)
+# pd.set_option('display.max_columns', None)
+# pd.set_option('display.width', None)
+# pd.set_option('display.max_colwidth', None)
 records_created = 0
 records_errored = 0
 records_updated = 0
@@ -52,7 +73,10 @@ def validateMinMaxFile(data, job_log_id):
     global records_deleted
     
     try:
-        chunks = commonFunctions.get_csv_from_s3(data['raw_file_path'].iloc[0])
+        response = s3_client.get_object(Bucket=os.getenv('AWS_BUCKET'), Key=data['raw_file_path'].iloc[0])
+        row_data = response['Body'].read().decode('utf-8')
+
+        chunks = pd.read_csv(StringIO(row_data), chunksize=constants.chunk_size, dtype=str)
         
         processed_chunks =[]
         comb_key_array = []
@@ -149,7 +173,7 @@ def validateMinMaxFile(data, job_log_id):
        
         file_location = f"FileImport/validatedFiles/{data['module'].iloc[0]}/{data['id'].iloc[0]}minMaxValidated.csv"
         
-        commonFunctions.upload_csv_to_s3(validated_data, file_location)
+        upload_csv_to_s3(validated_data, file_location)
         
         cur.execute(file_import_update_query, (
             constants.FileImportStatus['VALIDATED'], #status 
@@ -275,7 +299,7 @@ def store_data(validated_data, file_data, job_log_id):
                 conn.commit()
 
             final_path = f"FileImport/validatedFiles/{file_data['module'].iloc[0]}/{file_data['id'].iloc[0]}minMaxProcessed.csv"
-            commonFunctions.upload_csv_to_s3(validated_data, final_path)
+            upload_csv_to_s3(validated_data, final_path)
             
             
         cur.execute(file_import_update_query, (
@@ -330,3 +354,23 @@ def store_data(validated_data, file_data, job_log_id):
         cur.close()
         conn.close()
             
+
+
+def upload_csv_to_s3(dataframe, s3_file_path):
+    try:
+        # Convert the DataFrame to CSV
+        csv_buffer = StringIO()
+        dataframe.to_csv(csv_buffer, index=False)
+
+        # Upload the CSV file to S3
+        s3_client.put_object(Bucket=os.getenv('AWS_BUCKET'), Key=s3_file_path, Body=csv_buffer.getvalue(), ACL='public-read')
+        
+    except Exception as e:
+        # Get the exception information
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        filename = exc_traceback.tb_frame.f_code.co_filename
+        line_number = exc_traceback.tb_lineno
+        
+        # Print the error message from the last frame in the traceback
+        failed_reason = f"Error occurred in {filename}, line {line_number} ==> {e}"
+        raise Exception(failed_reason)
