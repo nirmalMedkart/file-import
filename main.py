@@ -4,14 +4,14 @@ from validation_files.validateMinMaxFile import validateMinMaxFile
 from connections import get_connection
 import pandas as pd
 import constants
-import jobStatus
+import commonFunctions
 
 
 def validateUploadedFile(data, job_log_id):    
     try:   
         
         # Process the job
-        jobStatus.processing(job_log_id)
+        commonFunctions.processing(job_log_id)
         
         if data['module'].iloc[0] == constants.modules['MIN_MAX']:
             validateMinMaxFile(data, job_log_id)
@@ -48,10 +48,10 @@ if __name__ == "__main__":
     
     
     # Initiate a new process
-    job_log_id = jobStatus.initiate_process("FILE_IMPORT", df['module'].iloc[0], f"{df['module'].iloc[0]}_JOB", df['id'].iloc[0], df['created_by'].iloc[0])
+    job_log_id = commonFunctions.initiate_process("FILE_IMPORT", df['module'].iloc[0], f"{df['module'].iloc[0]}_JOB", df['id'].iloc[0], df['created_by'].iloc[0])
     
     validateUploadedFile(df, job_log_id)
     
 
     # # Complete the job
-    # jobStatus.completed(job_log_id, error_log={"error": "Some error occurred"}, error_message="An error occurred during processing")
+    # commonFunctions.completed(job_log_id, error_log={"error": "Some error occurred"}, error_message="An error occurred during processing")
